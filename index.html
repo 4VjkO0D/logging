@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1F6F63">
+<title>Kaloriloggen</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <span class="wordmark">Kaloriloggen</span>
+      <nav class="tabs" id="tabs">
+        <button class="tab active" data-view="today">Idag</button>
+        <button class="tab" data-view="add">Logga</button>
+        <button class="tab" data-view="batches">Rätter</button>
+        <button class="tab" data-view="foods">Livsmedel</button>
+        <button class="tab" data-view="history">Historik</button>
+        <button class="tab" data-view="settings">Inställningar</button>
+      </nav>
+    </div>
+  </header>
+
+  <main id="views">
+
+    <!-- TODAY -->
+    <section class="view" id="view-today">
+      <div class="dial-card">
+        <div class="dial-wrap">
+          <svg viewBox="0 0 200 200" class="dial-svg" id="dial-svg">
+            <circle cx="100" cy="100" r="86" class="dial-track"/>
+            <circle cx="100" cy="100" r="86" class="dial-progress" id="dial-progress"/>
+          </svg>
+          <div class="dial-center">
+            <span class="dial-number" id="dial-remaining">0</span>
+            <span class="dial-label">kcal kvar</span>
+          </div>
+        </div>
+        <div class="dial-footline">
+          <span id="dial-consumed">0 kcal loggat</span>
+          <span class="dot">·</span>
+          <span id="dial-limit">mål 0 kcal</span>
+        </div>
+      </div>
+
+      <div class="quicklog-row" id="quicklog-row">
+        <!-- quick log chips injected here -->
+      </div>
+
+      <div class="section-head">
+        <h2>Idag</h2>
+        <span class="muted" id="today-date-label"></span>
+      </div>
+      <ul class="log-list" id="today-log-list"></ul>
+      <p class="empty-hint" id="today-empty" hidden>Inget loggat än idag. Tryck på <strong>Logga</strong> för att lägga till något.</p>
+    </section>
+
+    <!-- ADD -->
+    <section class="view" id="view-add" hidden>
+      <div class="segmented" id="add-mode-toggle">
+        <button class="seg active" data-mode="ai">AI-uppskattning</button>
+        <button class="seg" data-mode="manual">Exakta värden</button>
+      </div>
+
+      <!-- AI mode -->
+      <div class="panel" id="add-ai-panel">
+        <label class="field-label" for="ai-desc">Vad åt du? (och hur många gram)</label>
+        <div class="input-with-mic">
+          <input type="text" id="ai-desc" placeholder="t.ex. broccoli, 150 gram" autocomplete="off">
+          <button class="mic-btn" id="mic-btn" type="button" title="Tala in">
+            <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+          </button>
+        </div>
+        <p class="mic-status" id="mic-status"></p>
+        <button class="btn-primary" id="ai-estimate-btn">Fråga AI</button>
+
+        <div class="ai-result" id="ai-result" hidden>
+          <div class="ai-result-row">
+            <span id="ai-result-name">–</span>
+            <span class="mono" id="ai-result-cals">– kcal</span>
+          </div>
+          <div class="field-row">
+            <label>Gram <input type="number" id="ai-result-grams" class="mono"></label>
+            <label>Totalt kcal <input type="number" id="ai-result-total" class="mono"></label>
+          </div>
+          <label class="checkbox-row"><input type="checkbox" id="ai-save-as-food"> Spara som fast livsmedel</label>
+          <button class="btn-primary" id="ai-confirm-btn">Logga</button>
+        </div>
+      </div>
+
+      <!-- Manual mode -->
+      <div class="panel" id="add-manual-panel" hidden>
+        <label class="field-label">Namn
+          <input type="text" id="manual-name" placeholder="t.ex. Kycklingfilé (min variant)">
+        </label>
+        <div class="field-row">
+          <label>Gram <input type="number" id="manual-grams" class="mono"></label>
+          <label>Totalt kcal <input type="number" id="manual-cals" class="mono"></label>
+        </div>
+        <label class="checkbox-row"><input type="checkbox" id="manual-save-as-food"> Spara som fast livsmedel</label>
+        <button class="btn-primary" id="manual-confirm-btn">Logga</button>
+      </div>
+    </section>
+
+    <!-- BATCHES -->
+    <section class="view" id="view-batches" hidden>
+      <div class="section-head">
+        <h2>Rätter</h2>
+        <button class="btn-small" id="new-batch-btn">+ Ny rätt</button>
+      </div>
+      <ul class="card-list" id="batch-list"></ul>
+      <p class="empty-hint" id="batch-empty" hidden>Inga sparade rätter än. En rätt är en batch, t.ex. en sallad du gör i en stor skål och äter av flera gånger.</p>
+
+      <div class="modal" id="batch-modal" hidden>
+        <div class="modal-card">
+          <h3>Ny rätt</h3>
+          <label class="field-label">Namn på rätten
+            <input type="text" id="batch-name" placeholder="t.ex. Sallad bowl">
+          </label>
+          <div id="batch-ingredients"></div>
+          <button class="btn-small" id="batch-add-ingredient">+ Lägg till ingrediens</button>
+          <div class="batch-total" id="batch-total">Totalt: 0 g · 0 kcal</div>
+          <div class="modal-actions">
+            <button class="btn-secondary" id="batch-cancel-btn">Avbryt</button>
+            <button class="btn-primary" id="batch-save-btn">Spara rätt</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal" id="batch-log-modal" hidden>
+        <div class="modal-card">
+          <h3 id="batch-log-title">Logga rätt</h3>
+          <label class="field-label">Hur många gram åt du?
+            <input type="number" id="batch-log-grams" class="mono" autocomplete="off">
+          </label>
+          <p class="muted" id="batch-log-preview"></p>
+          <div class="modal-actions">
+            <button class="btn-secondary" id="batch-log-cancel">Avbryt</button>
+            <button class="btn-primary" id="batch-log-confirm">Logga</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FOODS -->
+    <section class="view" id="view-foods" hidden>
+      <div class="section-head">
+        <h2>Livsmedel</h2>
+        <button class="btn-small" id="new-food-btn">+ Nytt livsmedel</button>
+      </div>
+      <ul class="card-list" id="food-list"></ul>
+      <p class="empty-hint" id="food-empty" hidden>Inga fasta livsmedel sparade än, t.ex. mjölk eller ditt vanliga kycklingmärke (tillagat).</p>
+
+      <div class="modal" id="food-modal" hidden>
+        <div class="modal-card">
+          <h3 id="food-modal-title">Nytt livsmedel</h3>
+          <label class="field-label">Namn
+            <input type="text" id="food-name" placeholder="t.ex. Kycklingfilé, tillagad">
+          </label>
+          <div class="field-row">
+            <label>Gram <input type="number" id="food-grams" class="mono"></label>
+            <label>Totalt kcal <input type="number" id="food-cals" class="mono"></label>
+          </div>
+          <p class="muted mono" id="food-density-preview"></p>
+          <div class="modal-actions">
+            <button class="btn-secondary" id="food-cancel-btn">Avbryt</button>
+            <button class="btn-primary" id="food-save-btn">Spara</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- HISTORY -->
+    <section class="view" id="view-history" hidden>
+      <div class="section-head">
+        <h2>Historik</h2>
+        <button class="btn-small" id="export-csv-btn">Exportera CSV</button>
+      </div>
+      <div class="chart-card">
+        <svg id="history-chart" viewBox="0 0 320 140" class="history-svg"></svg>
+      </div>
+      <ul class="card-list" id="history-day-list"></ul>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="view" id="view-settings" hidden>
+      <h2>Inställningar</h2>
+
+      <div class="panel">
+        <label class="field-label">Dagligt kalorimål (kcal)
+          <input type="number" id="setting-limit" class="mono">
+        </label>
+      </div>
+
+      <div class="panel">
+        <h3 class="panel-title">DeepSeek via din proxy</h3>
+        <label class="field-label">Proxy-URL
+          <input type="text" id="setting-proxy-url" placeholder="https://dinsida.se/proxy.php">
+        </label>
+        <label class="field-label">Hemlig token
+          <input type="text" id="setting-proxy-token" placeholder="samma som SECRET_TOKEN i proxy.php">
+        </label>
+        <label class="field-label">Modell
+          <select id="setting-model">
+            <option value="deepseek-chat">deepseek-chat</option>
+            <option value="deepseek-reasoner">deepseek-reasoner</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="panel">
+        <h3 class="panel-title">Röst</h3>
+        <label class="field-label">Språkkod för taligenkänning
+          <input type="text" id="setting-voice-lang" placeholder="sv-SE">
+        </label>
+      </div>
+
+      <button class="btn-primary" id="settings-save-btn">Spara inställningar</button>
+      <p class="muted small" id="settings-saved-msg" hidden>Sparat.</p>
+    </section>
+
+  </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
