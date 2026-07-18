@@ -1,0 +1,655 @@
+// ---------------------------------------------------------------------------
+// Kaloriloggen — storage helpers
+// ---------------------------------------------------------------------------
+const LS = {
+  settings: 'cl_settings',
+  foods: 'cl_foods',
+  batches: 'cl_batches',
+  logs: 'cl_logs',
+};
+
+function loadJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  } catch (e) {
+    return fallback;
+  }
+}
+function saveJSON(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function nowTimeStr() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+function fmtDateLabel(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  return date.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+let settings = Object.assign(
+  { dailyLimit: 2000, proxyUrl: '', proxyToken: '', model: 'deepseek-chat', voiceLang: 'sv-SE' },
+  loadJSON(LS.settings, {})
+);
+let foods = loadJSON(LS.foods, []);       // {id, name, calsPerGram}
+let batches = loadJSON(LS.batches, []);   // {id, name, ingredients:[{name,grams,calsPerGram}], totalGrams, totalCals}
+let logs = loadJSON(LS.logs, []);         // {id, date, time, description, grams, calories, type, refId}
+
+function persistAll() {
+  saveJSON(LS.settings, settings);
+  saveJSON(LS.foods, foods);
+  saveJSON(LS.batches, batches);
+  saveJSON(LS.logs, logs);
+}
+
+// ---------------------------------------------------------------------------
+// Tab navigation
+// ---------------------------------------------------------------------------
+const tabs = document.querySelectorAll('.tab');
+const views = document.querySelectorAll('.view');
+tabs.forEach(tab => {
+  tab.addEventListener('click', () => {
+    tabs.forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const target = tab.dataset.view;
+    views.forEach(v => v.hidden = (v.id !== `view-${target}`));
+    if (target === 'today') renderToday();
+    if (target === 'batches') renderBatches();
+    if (target === 'foods') renderFoods();
+    if (target === 'history') renderHistory();
+    if (target === 'settings') renderSettings();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DeepSeek proxy call
+// ---------------------------------------------------------------------------
+async function callDeepSeekJSON(systemPrompt, userPrompt) {
+  if (!settings.proxyUrl || !settings.proxyToken) {
+    throw new Error('Ställ in proxy-URL och token under Inställningar först.');
+  }
+  const res = await fetch(settings.proxyUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Proxy-Token': settings.proxyToken,
+    },
+    body: JSON.stringify({
+      model: settings.model || 'deepseek-chat',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.2,
+    }),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(`Proxy/DeepSeek-fel (${res.status}): ${t.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  let content = data?.choices?.[0]?.message?.content || '';
+  content = content.trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+  try {
+    return JSON.parse(content);
+  } catch (e) {
+    throw new Error('Kunde inte tolka AI-svaret som JSON: ' + content.slice(0, 200));
+  }
+}
+
+const FOOD_ESTIMATE_SYSTEM = `Du är en assistent som uppskattar kalorier i mat. Svara ENDAST med ett JSON-objekt och ingen övrig text, inga markdown-taggar. Formatet ska vara exakt:
+{"name": string, "grams": number, "caloriesTotal": number, "calsPerGram": number}
+Om användaren anger en mängd i gram, använd den mängden för "grams". Om ingen mängd anges, anta en rimlig portionsstorlek och sätt "grams" därefter. "calsPerGram" ska vara kalorier per gram för just denna maträtt/livsmedel (ta hänsyn till om den är tillagad, rå, kokt osv om det nämns eller är underförstått). "caloriesTotal" ska vara grams * calsPerGram.`;
+
+const INGREDIENT_DENSITY_SYSTEM = `Du är en assistent som uppskattar kaloritäthet i livsmedel. Svara ENDAST med ett JSON-objekt, ingen övrig text:
+{"calsPerGram": number}
+Ge kalorier per gram för den råvara/livsmedel som anges.`;
+
+// ---------------------------------------------------------------------------
+// Voice input (Web Speech API)
+// ---------------------------------------------------------------------------
+const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
+const micBtn = document.getElementById('mic-btn');
+const micStatus = document.getElementById('mic-status');
+const aiDescInput = document.getElementById('ai-desc');
+let recognition = null;
+let listening = false;
+
+if (SpeechRecognitionImpl) {
+  recognition = new SpeechRecognitionImpl();
+  recognition.continuous = false;
+  recognition.interimResults = false;
+
+  recognition.onresult = (e) => {
+    const transcript = e.results[0][0].transcript;
+    aiDescInput.value = transcript;
+  };
+  recognition.onerror = (e) => {
+    micStatus.textContent = 'Kunde inte höra dig (' + e.error + ').';
+  };
+  recognition.onend = () => {
+    listening = false;
+    micBtn.classList.remove('listening');
+    if (!micStatus.textContent.startsWith('Kunde inte')) micStatus.textContent = '';
+  };
+} else {
+  micBtn.disabled = true;
+  micStatus.textContent = 'Röstinmatning stöds inte i den här webbläsaren.';
+}
+
+micBtn.addEventListener('click', () => {
+  if (!recognition || listening) return;
+  recognition.lang = settings.voiceLang || 'sv-SE';
+  listening = true;
+  micBtn.classList.add('listening');
+  micStatus.textContent = 'Lyssnar...';
+  recognition.start();
+});
+
+// ---------------------------------------------------------------------------
+// TODAY view
+// ---------------------------------------------------------------------------
+function todaysLogs() {
+  const t = todayStr();
+  return logs.filter(l => l.date === t).sort((a, b) => (a.time < b.time ? 1 : -1));
+}
+
+function renderToday() {
+  document.getElementById('today-date-label').textContent = fmtDateLabel(todayStr());
+  const todays = todaysLogs();
+  const consumed = todays.reduce((s, l) => s + l.calories, 0);
+  const limit = settings.dailyLimit || 0;
+  const remaining = limit - consumed;
+
+  const dialNumber = document.getElementById('dial-remaining');
+  dialNumber.textContent = Math.round(remaining);
+  dialNumber.classList.toggle('over', remaining < 0);
+
+  const circumference = 540.4;
+  const progress = document.getElementById('dial-progress');
+  const fraction = limit > 0 ? Math.min(consumed / limit, 1) : 0;
+  progress.style.strokeDashoffset = circumference * (1 - fraction);
+  progress.style.stroke = consumed > limit ? getComputedStyle(document.documentElement).getPropertyValue('--brick') : getComputedStyle(document.documentElement).getPropertyValue('--pine');
+
+  document.getElementById('dial-consumed').textContent = `${Math.round(consumed)} kcal loggat`;
+  document.getElementById('dial-limit').textContent = `mål ${limit} kcal`;
+
+  // quick log chips = saved batches
+  const row = document.getElementById('quicklog-row');
+  row.innerHTML = '';
+  batches.forEach(b => {
+    const chip = document.createElement('button');
+    chip.className = 'chip';
+    chip.textContent = b.name;
+    chip.addEventListener('click', () => openBatchLogModal(b.id));
+    row.appendChild(chip);
+  });
+
+  const list = document.getElementById('today-log-list');
+  list.innerHTML = '';
+  document.getElementById('today-empty').hidden = todays.length > 0;
+  todays.forEach(l => {
+    const li = document.createElement('li');
+    li.className = 'log-item';
+    li.innerHTML = `
+      <div class="log-item-main">
+        <span class="log-item-name">${escapeHtml(l.description)}</span>
+        <span class="log-item-meta">${l.time} · ${l.grams ? Math.round(l.grams) + ' g' : ''}</span>
+      </div>
+      <span class="log-item-cals mono">${Math.round(l.calories)} kcal</span>
+      <button class="icon-btn" data-del="${l.id}" title="Ta bort">✕</button>
+    `;
+    list.appendChild(li);
+  });
+  list.querySelectorAll('[data-del]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      logs = logs.filter(l => l.id !== btn.dataset.del);
+      persistAll();
+      renderToday();
+    });
+  });
+}
+
+function addLog(entry) {
+  logs.push(Object.assign({
+    id: uid(),
+    date: todayStr(),
+    time: nowTimeStr(),
+  }, entry));
+  persistAll();
+  renderToday();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ---------------------------------------------------------------------------
+// ADD view — mode toggle
+// ---------------------------------------------------------------------------
+document.getElementById('add-mode-toggle').addEventListener('click', (e) => {
+  const btn = e.target.closest('.seg');
+  if (!btn) return;
+  document.querySelectorAll('#add-mode-toggle .seg').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const mode = btn.dataset.mode;
+  document.getElementById('add-ai-panel').hidden = mode !== 'ai';
+  document.getElementById('add-manual-panel').hidden = mode !== 'manual';
+});
+
+// --- AI estimate flow ---
+document.getElementById('ai-estimate-btn').addEventListener('click', async () => {
+  const desc = aiDescInput.value.trim();
+  if (!desc) return;
+  const btn = document.getElementById('ai-estimate-btn');
+  btn.disabled = true;
+  btn.textContent = 'Frågar AI...';
+  try {
+    const result = await callDeepSeekJSON(FOOD_ESTIMATE_SYSTEM, desc);
+    document.getElementById('ai-result-name').textContent = result.name || desc;
+    document.getElementById('ai-result-cals').textContent = `${Math.round(result.caloriesTotal)} kcal`;
+    document.getElementById('ai-result-grams').value = Math.round(result.grams);
+    document.getElementById('ai-result-total').value = Math.round(result.caloriesTotal);
+    document.getElementById('ai-result').hidden = false;
+    document.getElementById('ai-result').dataset.name = result.name || desc;
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Fråga AI';
+  }
+});
+
+document.getElementById('ai-confirm-btn').addEventListener('click', () => {
+  const name = document.getElementById('ai-result').dataset.name || aiDescInput.value.trim();
+  const grams = parseFloat(document.getElementById('ai-result-grams').value) || 0;
+  const total = parseFloat(document.getElementById('ai-result-total').value) || 0;
+  addLog({ description: name, grams, calories: total, type: 'ai' });
+  if (document.getElementById('ai-save-as-food').checked && grams > 0) {
+    foods.push({ id: uid(), name, calsPerGram: total / grams });
+    persistAll();
+  }
+  aiDescInput.value = '';
+  document.getElementById('ai-result').hidden = true;
+  document.getElementById('ai-save-as-food').checked = false;
+});
+
+// --- Manual flow ---
+const manualNameInput = document.getElementById('manual-name');
+const manualGramsInput = document.getElementById('manual-grams');
+const manualCalsInput = document.getElementById('manual-cals');
+let manualMatchedFood = null;
+
+function refreshFoodDatalist() {
+  let dl = document.getElementById('food-options');
+  if (!dl) {
+    dl = document.createElement('datalist');
+    dl.id = 'food-options';
+    document.body.appendChild(dl);
+    manualNameInput.setAttribute('list', 'food-options');
+  }
+  dl.innerHTML = foods.map(f => `<option value="${escapeHtml(f.name)}">`).join('');
+}
+
+manualNameInput.addEventListener('input', () => {
+  const match = foods.find(f => f.name.toLowerCase() === manualNameInput.value.trim().toLowerCase());
+  manualMatchedFood = match || null;
+  if (match && manualGramsInput.value) {
+    manualCalsInput.value = Math.round(match.calsPerGram * parseFloat(manualGramsInput.value));
+  }
+});
+manualGramsInput.addEventListener('input', () => {
+  if (manualMatchedFood) {
+    const g = parseFloat(manualGramsInput.value) || 0;
+    manualCalsInput.value = Math.round(manualMatchedFood.calsPerGram * g);
+  }
+});
+
+document.getElementById('manual-confirm-btn').addEventListener('click', () => {
+  const name = manualNameInput.value.trim();
+  const grams = parseFloat(manualGramsInput.value) || 0;
+  const cals = parseFloat(manualCalsInput.value) || 0;
+  if (!name || !cals) { alert('Fyll i namn och kalorier.'); return; }
+  addLog({ description: name, grams, calories: cals, type: 'manual' });
+  if (document.getElementById('manual-save-as-food').checked && grams > 0) {
+    foods.push({ id: uid(), name, calsPerGram: cals / grams });
+    persistAll();
+    refreshFoodDatalist();
+  }
+  manualNameInput.value = '';
+  manualGramsInput.value = '';
+  manualCalsInput.value = '';
+  manualMatchedFood = null;
+  document.getElementById('manual-save-as-food').checked = false;
+});
+
+// ---------------------------------------------------------------------------
+// BATCHES view
+// ---------------------------------------------------------------------------
+function renderBatches() {
+  const list = document.getElementById('batch-list');
+  list.innerHTML = '';
+  document.getElementById('batch-empty').hidden = batches.length > 0;
+  batches.forEach(b => {
+    const density = b.totalGrams > 0 ? b.totalCals / b.totalGrams : 0;
+    const li = document.createElement('li');
+    li.className = 'card-item';
+    li.innerHTML = `
+      <div class="log-item-main">
+        <span class="log-item-name">${escapeHtml(b.name)}</span>
+        <span class="log-item-meta">${Math.round(b.totalGrams)} g totalt · ${density.toFixed(2)} kcal/g</span>
+      </div>
+      <button class="btn-small" data-log="${b.id}">Logga</button>
+      <button class="icon-btn" data-del="${b.id}" title="Ta bort">✕</button>
+    `;
+    list.appendChild(li);
+  });
+  list.querySelectorAll('[data-log]').forEach(btn => btn.addEventListener('click', () => openBatchLogModal(btn.dataset.log)));
+  list.querySelectorAll('[data-del]').forEach(btn => btn.addEventListener('click', () => {
+    if (!confirm('Ta bort den här rätten?')) return;
+    batches = batches.filter(b => b.id !== btn.dataset.del);
+    persistAll();
+    renderBatches();
+  }));
+}
+
+// --- New batch modal ---
+const batchModal = document.getElementById('batch-modal');
+let batchDraftIngredients = [];
+
+document.getElementById('new-batch-btn').addEventListener('click', () => {
+  batchDraftIngredients = [];
+  document.getElementById('batch-name').value = '';
+  document.getElementById('batch-ingredients').innerHTML = '';
+  addIngredientRow();
+  updateBatchTotal();
+  batchModal.hidden = false;
+});
+document.getElementById('batch-cancel-btn').addEventListener('click', () => batchModal.hidden = true);
+
+function addIngredientRow() {
+  const idx = batchDraftIngredients.length;
+  batchDraftIngredients.push({ name: '', grams: 0, calsPerGram: 0 });
+  const wrap = document.getElementById('batch-ingredients');
+  const row = document.createElement('div');
+  row.className = 'ingredient-row';
+  row.dataset.idx = idx;
+  row.innerHTML = `
+    <label class="field-label">Ingrediens
+      <input type="text" class="ing-name" list="food-options" placeholder="t.ex. broccoli">
+    </label>
+    <label class="field-label grams-field">Gram
+      <input type="number" class="ing-grams mono">
+    </label>
+    <label class="field-label grams-field">kcal/g
+      <input type="number" step="0.01" class="ing-density mono">
+    </label>
+    <button class="btn-small ing-ai" type="button">AI</button>
+    <button class="remove-ing" type="button">✕</button>
+  `;
+  document.getElementById('batch-ingredients').appendChild(row);
+
+  const nameEl = row.querySelector('.ing-name');
+  const gramsEl = row.querySelector('.ing-grams');
+  const densityEl = row.querySelector('.ing-density');
+
+  nameEl.addEventListener('input', () => {
+    batchDraftIngredients[idx].name = nameEl.value;
+    const match = foods.find(f => f.name.toLowerCase() === nameEl.value.trim().toLowerCase());
+    if (match) {
+      densityEl.value = match.calsPerGram.toFixed(2);
+      batchDraftIngredients[idx].calsPerGram = match.calsPerGram;
+    }
+    updateBatchTotal();
+  });
+  gramsEl.addEventListener('input', () => {
+    batchDraftIngredients[idx].grams = parseFloat(gramsEl.value) || 0;
+    updateBatchTotal();
+  });
+  densityEl.addEventListener('input', () => {
+    batchDraftIngredients[idx].calsPerGram = parseFloat(densityEl.value) || 0;
+    updateBatchTotal();
+  });
+  row.querySelector('.ing-ai').addEventListener('click', async () => {
+    const name = nameEl.value.trim();
+    if (!name) { alert('Skriv ett namn på ingrediensen först.'); return; }
+    const aiBtn = row.querySelector('.ing-ai');
+    aiBtn.disabled = true;
+    aiBtn.textContent = '...';
+    try {
+      const result = await callDeepSeekJSON(INGREDIENT_DENSITY_SYSTEM, name);
+      densityEl.value = result.calsPerGram.toFixed(2);
+      batchDraftIngredients[idx].calsPerGram = result.calsPerGram;
+      updateBatchTotal();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      aiBtn.disabled = false;
+      aiBtn.textContent = 'AI';
+    }
+  });
+  row.querySelector('.remove-ing').addEventListener('click', () => {
+    row.remove();
+    batchDraftIngredients[idx] = null;
+    updateBatchTotal();
+  });
+}
+document.getElementById('batch-add-ingredient').addEventListener('click', addIngredientRow);
+
+function updateBatchTotal() {
+  const valid = batchDraftIngredients.filter(Boolean);
+  const totalGrams = valid.reduce((s, i) => s + (i.grams || 0), 0);
+  const totalCals = valid.reduce((s, i) => s + (i.grams || 0) * (i.calsPerGram || 0), 0);
+  document.getElementById('batch-total').textContent = `Totalt: ${Math.round(totalGrams)} g · ${Math.round(totalCals)} kcal`;
+}
+
+document.getElementById('batch-save-btn').addEventListener('click', () => {
+  const name = document.getElementById('batch-name').value.trim();
+  const valid = batchDraftIngredients.filter(Boolean).filter(i => i.name && i.grams > 0);
+  if (!name || valid.length === 0) { alert('Ge rätten ett namn och minst en ingrediens med gram.'); return; }
+  const totalGrams = valid.reduce((s, i) => s + i.grams, 0);
+  const totalCals = valid.reduce((s, i) => s + i.grams * i.calsPerGram, 0);
+  batches.push({ id: uid(), name, ingredients: valid, totalGrams, totalCals, createdAt: Date.now() });
+  persistAll();
+  batchModal.hidden = true;
+  renderBatches();
+});
+
+// --- Log a batch ---
+const batchLogModal = document.getElementById('batch-log-modal');
+let batchBeingLogged = null;
+
+function openBatchLogModal(batchId) {
+  batchBeingLogged = batches.find(b => b.id === batchId);
+  if (!batchBeingLogged) return;
+  document.getElementById('batch-log-title').textContent = `Logga: ${batchBeingLogged.name}`;
+  document.getElementById('batch-log-grams').value = '';
+  document.getElementById('batch-log-preview').textContent = '';
+  batchLogModal.hidden = false;
+}
+document.getElementById('batch-log-cancel').addEventListener('click', () => batchLogModal.hidden = true);
+document.getElementById('batch-log-grams').addEventListener('input', (e) => {
+  if (!batchBeingLogged) return;
+  const g = parseFloat(e.target.value) || 0;
+  const density = batchBeingLogged.totalGrams > 0 ? batchBeingLogged.totalCals / batchBeingLogged.totalGrams : 0;
+  document.getElementById('batch-log-preview').textContent = `≈ ${Math.round(g * density)} kcal`;
+});
+document.getElementById('batch-log-confirm').addEventListener('click', () => {
+  if (!batchBeingLogged) return;
+  const g = parseFloat(document.getElementById('batch-log-grams').value) || 0;
+  if (g <= 0) { alert('Ange gram.'); return; }
+  const density = batchBeingLogged.totalGrams > 0 ? batchBeingLogged.totalCals / batchBeingLogged.totalGrams : 0;
+  addLog({ description: batchBeingLogged.name, grams: g, calories: g * density, type: 'batch', refId: batchBeingLogged.id });
+  batchLogModal.hidden = true;
+});
+
+// ---------------------------------------------------------------------------
+// FOODS view
+// ---------------------------------------------------------------------------
+function renderFoods() {
+  refreshFoodDatalist();
+  const list = document.getElementById('food-list');
+  list.innerHTML = '';
+  document.getElementById('food-empty').hidden = foods.length > 0;
+  foods.forEach(f => {
+    const li = document.createElement('li');
+    li.className = 'card-item';
+    li.innerHTML = `
+      <div class="log-item-main">
+        <span class="log-item-name">${escapeHtml(f.name)}</span>
+        <span class="log-item-meta">${f.calsPerGram.toFixed(2)} kcal/g</span>
+      </div>
+      <button class="icon-btn" data-del="${f.id}" title="Ta bort">✕</button>
+    `;
+    list.appendChild(li);
+  });
+  list.querySelectorAll('[data-del]').forEach(btn => btn.addEventListener('click', () => {
+    if (!confirm('Ta bort det här livsmedlet?')) return;
+    foods = foods.filter(f => f.id !== btn.dataset.del);
+    persistAll();
+    renderFoods();
+  }));
+}
+
+const foodModal = document.getElementById('food-modal');
+document.getElementById('new-food-btn').addEventListener('click', () => {
+  document.getElementById('food-name').value = '';
+  document.getElementById('food-grams').value = '';
+  document.getElementById('food-cals').value = '';
+  document.getElementById('food-density-preview').textContent = '';
+  foodModal.hidden = false;
+});
+document.getElementById('food-cancel-btn').addEventListener('click', () => foodModal.hidden = true);
+function updateFoodDensityPreview() {
+  const g = parseFloat(document.getElementById('food-grams').value) || 0;
+  const c = parseFloat(document.getElementById('food-cals').value) || 0;
+  document.getElementById('food-density-preview').textContent = g > 0 ? `= ${(c / g).toFixed(2)} kcal/g` : '';
+}
+document.getElementById('food-grams').addEventListener('input', updateFoodDensityPreview);
+document.getElementById('food-cals').addEventListener('input', updateFoodDensityPreview);
+document.getElementById('food-save-btn').addEventListener('click', () => {
+  const name = document.getElementById('food-name').value.trim();
+  const g = parseFloat(document.getElementById('food-grams').value) || 0;
+  const c = parseFloat(document.getElementById('food-cals').value) || 0;
+  if (!name || g <= 0 || c <= 0) { alert('Fyll i namn, gram och kalorier.'); return; }
+  foods.push({ id: uid(), name, calsPerGram: c / g });
+  persistAll();
+  foodModal.hidden = true;
+  renderFoods();
+});
+
+// ---------------------------------------------------------------------------
+// HISTORY view
+// ---------------------------------------------------------------------------
+function renderHistory() {
+  const byDate = {};
+  logs.forEach(l => { byDate[l.date] = (byDate[l.date] || 0) + l.calories; });
+  const dates = Object.keys(byDate).sort().reverse().slice(0, 30);
+
+  const list = document.getElementById('history-day-list');
+  list.innerHTML = '';
+  dates.forEach(d => {
+    const li = document.createElement('li');
+    li.className = 'card-item';
+    const over = byDate[d] > (settings.dailyLimit || Infinity);
+    li.innerHTML = `
+      <div class="log-item-main">
+        <span class="log-item-name">${fmtDateLabel(d)}</span>
+      </div>
+      <span class="log-item-cals mono" style="color:${over ? 'var(--brick)' : 'var(--pine-dark)'}">${Math.round(byDate[d])} kcal</span>
+    `;
+    list.appendChild(li);
+  });
+
+  // chart: last 14 days, chronological
+  const chartDates = dates.slice(0, 14).reverse();
+  const svg = document.getElementById('history-chart');
+  svg.innerHTML = '';
+  const limit = settings.dailyLimit || 0;
+  const maxVal = Math.max(limit, ...chartDates.map(d => byDate[d]), 1);
+  const w = 320, h = 140, padBottom = 18, barGap = 4;
+  const barWidth = chartDates.length ? (w / chartDates.length) - barGap : 0;
+
+  if (limit > 0) {
+    const y = h - padBottom - (limit / maxVal) * (h - padBottom);
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', 0); line.setAttribute('x2', w);
+    line.setAttribute('y1', y); line.setAttribute('y2', y);
+    line.setAttribute('stroke', '#C7830F');
+    line.setAttribute('stroke-dasharray', '4,3');
+    line.setAttribute('stroke-width', '1.5');
+    svg.appendChild(line);
+  }
+
+  chartDates.forEach((d, i) => {
+    const val = byDate[d];
+    const barH = (val / maxVal) * (h - padBottom);
+    const x = i * (barWidth + barGap);
+    const y = h - padBottom - barH;
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', x);
+    rect.setAttribute('y', y);
+    rect.setAttribute('width', Math.max(barWidth, 2));
+    rect.setAttribute('height', Math.max(barH, 1));
+    rect.setAttribute('rx', 3);
+    rect.setAttribute('fill', val > limit && limit > 0 ? '#B5533C' : '#1F6F63');
+    svg.appendChild(rect);
+  });
+}
+
+document.getElementById('export-csv-btn').addEventListener('click', () => {
+  const header = ['date', 'time', 'description', 'grams', 'calories', 'type'];
+  const rows = logs.slice().sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
+    .map(l => [l.date, l.time, `"${(l.description || '').replace(/"/g, '""')}"`, l.grams || '', Math.round(l.calories), l.type]);
+  const csv = [header.join(','), ...rows.map(r => r.join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `kaloriloggen-${todayStr()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// ---------------------------------------------------------------------------
+// SETTINGS view
+// ---------------------------------------------------------------------------
+function renderSettings() {
+  document.getElementById('setting-limit').value = settings.dailyLimit;
+  document.getElementById('setting-proxy-url').value = settings.proxyUrl;
+  document.getElementById('setting-proxy-token').value = settings.proxyToken;
+  document.getElementById('setting-model').value = settings.model;
+  document.getElementById('setting-voice-lang').value = settings.voiceLang;
+  document.getElementById('settings-saved-msg').hidden = true;
+}
+document.getElementById('settings-save-btn').addEventListener('click', () => {
+  settings.dailyLimit = parseFloat(document.getElementById('setting-limit').value) || 0;
+  settings.proxyUrl = document.getElementById('setting-proxy-url').value.trim();
+  settings.proxyToken = document.getElementById('setting-proxy-token').value.trim();
+  settings.model = document.getElementById('setting-model').value;
+  settings.voiceLang = document.getElementById('setting-voice-lang').value.trim() || 'sv-SE';
+  persistAll();
+  document.getElementById('settings-saved-msg').hidden = false;
+});
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+refreshFoodDatalist();
+renderToday();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
