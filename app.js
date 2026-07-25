@@ -39,7 +39,7 @@ function fmtDateLabel(dateStr) {
 }
 
 let settings = Object.assign(
-  { dailyLimit: 2000, proxyUrl: '', proxyToken: '', model: 'deepseek-chat', voiceLang: 'sv-SE' },
+  { dailyLimit: 2000, proxyUrl: '', proxyToken: '', model: 'deepseek-v4-flash', voiceLang: 'sv-SE' },
   loadJSON(LS.settings, {})
 );
 let foods = loadJSON(LS.foods, []);       // {id, name, calsPerGram}
@@ -106,7 +106,7 @@ async function callDeepSeekJSON(systemPrompt, userPrompt) {
       'X-Proxy-Token': settings.proxyToken,
     },
     body: JSON.stringify({
-      model: settings.model || 'deepseek-chat',
+      model: settings.model || 'deepseek-v4-flash',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -173,7 +173,7 @@ async function callDeepSeekRaw(systemPrompt, historyMessages) {
       'X-Proxy-Token': settings.proxyToken,
     },
     body: JSON.stringify({
-      model: settings.model || 'deepseek-chat',
+      model: settings.model || 'deepseek-v4-flash',
       messages: [
         { role: 'system', content: systemPrompt },
         ...historyMessages.map(m => ({ role: m.role, content: m.content })),
