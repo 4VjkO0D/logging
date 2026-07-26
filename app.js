@@ -270,8 +270,9 @@ ${CHAT_PROTOCOL}`;
 // Voice input (Web Speech API) — manual toggle: tap to start, tap to stop
 // ---------------------------------------------------------------------------
 // Recording NEVER stops until the user taps the button.
-// Uses continuous=true (one session, no OS restart sounds) with string-based
-// dedup: rebuilds full transcript every event and only appends genuinely new text.
+// Uses continuous=false in a loop — each utterance gets a fresh instance,
+// which gives clean single results (no duplication). When an utterance ends,
+// if the user hasn't tapped stop, a new instance starts immediately.
 const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 function setupVoiceInput(inputEl, btnEl, statusEl) {
@@ -280,82 +281,71 @@ function setupVoiceInput(inputEl, btnEl, statusEl) {
     statusEl.textContent = 'Röstinmatning stöds inte i den här webbläsaren.';
     return;
   }
-  let recognition = null;
+  let currentRecognition = null;
   let listening = false;
   let finalTranscript = '';
 
-  function stopListening() {
-    if (recognition) {
-      try { recognition.stop(); } catch (e) { /* ignore */ }
-      recognition = null;
-    }
-    listening = false;
-    btnEl.classList.remove('listening');
-    btnEl.classList.remove('recording');
-    if (finalTranscript) {
-      inputEl.value = finalTranscript;
-    }
-    statusEl.textContent = '';
+  function startInstance() {
+    if (!listening) return;
+    const rec = new SpeechRecognitionImpl();
+    rec.continuous = false;
+    rec.interimResults = true;
+    rec.lang = settings.voiceLang || 'sv-SE';
+
+    rec.onresult = (e) => {
+      // continuous=false ⇒ exactly one result per event.
+      const result = e.results[0];
+      const text = result[0].transcript;
+      if (result.isFinal) {
+        finalTranscript += text;
+        inputEl.value = finalTranscript;
+      } else {
+        inputEl.value = finalTranscript + text;
+      }
+    };
+    rec.onerror = () => { /* ignore — onend handles cleanup */ };
+    rec.onend = () => {
+      currentRecognition = null;
+      if (!listening) {
+        // User stopped — final cleanup.
+        btnEl.classList.remove('listening');
+        btnEl.classList.remove('recording');
+        statusEl.textContent = '';
+        return;
+      }
+      // Still recording — keep going with a fresh instance.
+      startInstance();
+    };
+
+    currentRecognition = rec;
+    try { rec.start(); } catch (e) { /* ignore */ }
   }
 
   btnEl.addEventListener('click', () => {
     if (listening) {
-      stopListening();
+      // User tapped to stop — abort and don't restart.
+      listening = false;
+      if (currentRecognition) {
+        try { currentRecognition.abort(); } catch (e) { /* ignore */ }
+        currentRecognition = null;
+      }
+      btnEl.classList.remove('listening');
+      btnEl.classList.remove('recording');
+      if (finalTranscript) {
+        inputEl.value = finalTranscript;
+      }
+      statusEl.textContent = '';
       return;
     }
 
     // User tapped to start.
     finalTranscript = '';
     inputEl.value = '';
-    recognition = new SpeechRecognitionImpl();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = settings.voiceLang || 'sv-SE';
-
-    recognition.onresult = (e) => {
-      // Build full transcript from ALL final results (indices 0..N).
-      // The browser may re-fire old results — compare against finalTranscript
-      // to only append genuinely new text.
-      let fullFinal = '';
-      let fullInterim = '';
-      for (let i = 0; i < e.results.length; i++) {
-        if (e.results[i].isFinal) {
-          fullFinal += e.results[i][0].transcript;
-        } else {
-          fullInterim += e.results[i][0].transcript;
-        }
-      }
-      // Only append the part of fullFinal that extends beyond what we already have.
-      if (fullFinal.length > finalTranscript.length && fullFinal.startsWith(finalTranscript)) {
-        finalTranscript = fullFinal;
-        inputEl.value = finalTranscript + fullInterim;
-      } else if (fullFinal.length <= finalTranscript.length) {
-        // Re-delivery of old results — just show whatever we have + interim.
-        inputEl.value = finalTranscript + fullInterim;
-      } else {
-        // fullFinal is longer but doesn't start with finalTranscript —
-        // the API reset or delivered in weird order; trust fullFinal.
-        finalTranscript = fullFinal;
-        inputEl.value = fullFinal + fullInterim;
-      }
-    };
-    recognition.onerror = (e) => {
-      if (e.error !== 'aborted' && e.error !== 'no-speech') {
-        statusEl.textContent = 'Kunde inte höra dig (' + e.error + ').';
-      }
-      stopListening();
-    };
-    recognition.onend = () => {
-      if (listening) {
-        stopListening();
-      }
-    };
-
     listening = true;
     btnEl.classList.add('listening');
     btnEl.classList.add('recording');
     statusEl.textContent = 'Spelar in — tryck igen för att stoppa';
-    recognition.start();
+    startInstance();
   });
 }
 
