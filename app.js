@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Kaloriloggen — storage helpers
+// Road to 80 — storage helpers
 // ---------------------------------------------------------------------------
 const LS = {
   settings: 'cl_settings',
@@ -69,6 +69,7 @@ tabs.forEach(tab => {
     const target = tab.dataset.view;
     views.forEach(v => v.hidden = (v.id !== `view-${target}`));
     if (target === 'today') renderToday();
+    if (target === 'add') renderChatMessages();
     if (target === 'batches') renderBatches();
     if (target === 'foods') renderFoods();
     if (target === 'history') renderHistory();
@@ -222,22 +223,6 @@ function savedFoodsForPrompt() {
   }));
 }
 
-function buildFoodEstimateSystem() {
-  return `Du är en assistent som uppskattar kalorier i mat. Svara ENDAST med ett JSON-objekt och ingen övrig text, inga markdown-taggar. Formatet ska vara exakt:
-{"valid": boolean, "name": string, "grams": number, "caloriesTotal": number, "calsPerGram": number, "source": "sparat livsmedel" | "AI-uppskattning" | "webbsökning"}
-
-Sätt "valid" till false om texten inte rimligen beskriver ett ätbart livsmedel eller en maträtt (t.ex. om texten är oklar, obegriplig, eller inte handlar om mat, som "ja" eller "hej"). Gissa då INGA kalorivärden, sätt alla siffror till 0.
-
-Användarens sparade livsmedel (använd EXAKT dessa kcal/gram-värden om ett omnämnt livsmedel matchar "name" ELLER "altName" i listan — de är två namn på samma sparade livsmedel — gissa då inte annat, och sätt "source" till "sparat livsmedel"):
-${JSON.stringify(savedFoodsForPrompt())}
-
-Om inget sparat livsmedel matchar, avgör enligt denna REGEL (inte efter hur säker du "känner dig" — den känslan är opålitlig, använd istället dessa konkreta kriterier):
-- Om namnet innehåller ett varumärke, en butiks-/kedjeprodukt, en restaurang-/snabbmatsrätt, eller en specifik förpackad produkt (t.ex. "IKEA köttbullar", "Snickers", "Marabou mjölkchoklad", "McDonald's Big Mac", "ICA Basic kycklingfilé") — använd ALLTID verktyget web_search för att slå upp exakt värde innan du svarar, oavsett om du tror dig veta svaret. Sätt "source" till "webbsökning".
-- Annars, om det är en vanlig råvara eller hemlagad mat utan varumärke (t.ex. "kyckling", "ris", "äpple", "broccoli", "pannkakor") — uppskatta direkt själv utan att söka, och sätt "source" till "AI-uppskattning".
-
-Om användaren anger en mängd i gram, använd den för "grams". Om ingen mängd anges, anta en rimlig portionsstorlek. "calsPerGram" ska ta hänsyn till om maten är tillagad, rå, kokt osv om det nämns eller är underförstått. "caloriesTotal" ska vara grams * calsPerGram.`;
-}
-
 function buildIngredientDensitySystem() {
   return `Du är en assistent som uppskattar kaloritäthet i livsmedel. Svara ENDAST med ett JSON-objekt, ingen övrig text:
 {"valid": boolean, "calsPerGram": number}
@@ -281,10 +266,9 @@ ${CHAT_PROTOCOL}`;
 }
 
 // ---------------------------------------------------------------------------
-// Voice input (Web Speech API)
+// Voice input (Web Speech API) — manual toggle: tap to start, tap to stop
 // ---------------------------------------------------------------------------
 const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
-const aiDescInput = document.getElementById('ai-desc');
 
 function setupVoiceInput(inputEl, btnEl, statusEl) {
   if (!SpeechRecognitionImpl) {
@@ -292,34 +276,79 @@ function setupVoiceInput(inputEl, btnEl, statusEl) {
     statusEl.textContent = 'Röstinmatning stöds inte i den här webbläsaren.';
     return;
   }
-  const recognition = new SpeechRecognitionImpl();
-  recognition.continuous = false;
-  recognition.interimResults = false;
+  let recognition = null;
   let listening = false;
+  let finalTranscript = '';
 
-  recognition.onresult = (e) => {
-    inputEl.value = e.results[0][0].transcript;
-  };
-  recognition.onerror = (e) => {
-    statusEl.textContent = 'Kunde inte höra dig (' + e.error + ').';
-  };
-  recognition.onend = () => {
+  function stopListening() {
+    if (recognition) {
+      try { recognition.stop(); } catch (e) { /* ignore */ }
+    }
     listening = false;
     btnEl.classList.remove('listening');
-    if (!statusEl.textContent.startsWith('Kunde inte')) statusEl.textContent = '';
-  };
+    btnEl.classList.remove('recording');
+    if (finalTranscript) {
+      inputEl.value = finalTranscript;
+    }
+    statusEl.textContent = '';
+  }
 
   btnEl.addEventListener('click', () => {
-    if (listening) return;
+    if (listening) {
+      // User tapped to stop
+      stopListening();
+      return;
+    }
+
+    // User tapped to start
+    finalTranscript = '';
+    recognition = new SpeechRecognitionImpl();
+    recognition.continuous = true;
+    recognition.interimResults = true;
     recognition.lang = settings.voiceLang || 'sv-SE';
+
+    recognition.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) {
+          finalTranscript += e.results[i][0].transcript;
+        } else {
+          interim += e.results[i][0].transcript;
+        }
+      }
+      inputEl.value = finalTranscript + interim;
+    };
+    recognition.onerror = (e) => {
+      if (e.error === 'aborted' || e.error === 'no-speech') {
+        // User stopped or no speech — just end gracefully
+      } else {
+        statusEl.textContent = 'Kunde inte höra dig (' + e.error + ').';
+      }
+      stopListening();
+    };
+    recognition.onend = () => {
+      // If recognition ended on its own (not via our stopListening call),
+      // clean up state.
+      if (listening) {
+        if (finalTranscript) {
+          inputEl.value = finalTranscript;
+        }
+        listening = false;
+        btnEl.classList.remove('listening');
+        btnEl.classList.remove('recording');
+        if (!statusEl.textContent.startsWith('Kunde inte')) statusEl.textContent = '';
+        recognition = null;
+      }
+    };
+
     listening = true;
     btnEl.classList.add('listening');
-    statusEl.textContent = 'Lyssnar...';
+    btnEl.classList.add('recording');
+    statusEl.textContent = 'Spelar in — tryck igen för att stoppa';
     recognition.start();
   });
 }
 
-setupVoiceInput(aiDescInput, document.getElementById('mic-btn'), document.getElementById('mic-status'));
 setupVoiceInput(document.getElementById('chat-input'), document.getElementById('chat-mic-btn'), document.getElementById('chat-mic-status'));
 
 // ---------------------------------------------------------------------------
@@ -387,152 +416,40 @@ function renderToday() {
   });
 }
 
+// Auto-add a food item to foods if it doesn't already exist.
+function autoSaveFood(name, grams, calories) {
+  if (!name || grams <= 0 || calories <= 0) return;
+  const calsPerGram = calories / grams;
+  const existing = foods.find(f =>
+    f.name.toLowerCase() === name.toLowerCase() ||
+    (f.altName && f.altName.toLowerCase() === name.toLowerCase())
+  );
+  if (!existing) {
+    foods.push({ id: uid(), name, calsPerGram });
+    persistAll();
+    refreshFoodDatalist();
+  }
+}
+
 function addLog(entry) {
-  logs.push(Object.assign({
+  const fullEntry = Object.assign({
     id: uid(),
     date: todayStr(),
     time: nowTimeStr(),
-  }, entry));
+  }, entry);
+  logs.push(fullEntry);
   persistAll();
+  // Auto-save to foods
+  autoSaveFood(fullEntry.description, fullEntry.grams, fullEntry.calories);
   renderToday();
 }
 
 function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&', '<': '<', '>': '>', '"': '"', "'": '&#39;' }[c]));
 }
 
 // ---------------------------------------------------------------------------
-// ADD view — mode toggle
-// ---------------------------------------------------------------------------
-document.getElementById('add-mode-toggle').addEventListener('click', (e) => {
-  const btn = e.target.closest('.seg');
-  if (!btn) return;
-  document.querySelectorAll('#add-mode-toggle .seg').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  const mode = btn.dataset.mode;
-  document.getElementById('add-ai-panel').hidden = mode !== 'ai';
-  document.getElementById('add-chat-panel').hidden = mode !== 'chat';
-  document.getElementById('add-manual-panel').hidden = mode !== 'manual';
-  if (mode === 'chat') renderChatMessages();
-});
-
-// --- AI estimate flow ---
-function showAiResult(name, grams, total, source) {
-  document.getElementById('ai-error').hidden = true;
-  document.getElementById('ai-result-name').textContent = name;
-  const badge = document.getElementById('ai-result-source');
-  badge.textContent = source;
-  badge.classList.toggle('saved', source === 'sparat livsmedel');
-  badge.classList.toggle('web', source === 'webbsökning');
-  document.getElementById('ai-result-cals').textContent = `${Math.round(total)} kcal`;
-  document.getElementById('ai-result-grams').value = Math.round(grams);
-  document.getElementById('ai-result-total').value = Math.round(total);
-  document.getElementById('ai-result').hidden = false;
-  document.getElementById('ai-result').dataset.name = name;
-}
-function showAiError(message) {
-  document.getElementById('ai-result').hidden = true;
-  const err = document.getElementById('ai-error');
-  err.textContent = message;
-  err.hidden = false;
-}
-
-document.getElementById('ai-estimate-btn').addEventListener('click', async () => {
-  const desc = aiDescInput.value.trim();
-  if (!desc) return;
-
-  // Bypass the AI entirely when the text clearly matches a saved food + a gram amount.
-  const localFood = findFoodMatch(desc);
-  const localGrams = extractGrams(desc);
-  if (localFood && localGrams) {
-    showAiResult(localFood.name, localGrams, localFood.calsPerGram * localGrams, 'sparat livsmedel');
-    return;
-  }
-
-  const btn = document.getElementById('ai-estimate-btn');
-  btn.disabled = true;
-  btn.textContent = 'Frågar AI...';
-  try {
-    const result = await callDeepSeekJSON(buildFoodEstimateSystem(), desc);
-    if (result.valid === false) {
-      showAiError('Kunde inte tolka det här som en maträtt. Beskriv gärna vad du åt tydligare.');
-      return;
-    }
-    showAiResult(result.name || desc, result.grams, result.caloriesTotal, result.source || 'AI-uppskattning');
-  } catch (err) {
-    alert(err.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Fråga AI';
-  }
-});
-
-document.getElementById('ai-confirm-btn').addEventListener('click', () => {
-  const name = document.getElementById('ai-result').dataset.name || aiDescInput.value.trim();
-  const grams = parseFloat(document.getElementById('ai-result-grams').value) || 0;
-  const total = parseFloat(document.getElementById('ai-result-total').value) || 0;
-  addLog({ description: name, grams, calories: total, type: 'ai' });
-  if (document.getElementById('ai-save-as-food').checked && grams > 0) {
-    foods.push({ id: uid(), name, calsPerGram: total / grams });
-    persistAll();
-  }
-  aiDescInput.value = '';
-  document.getElementById('ai-result').hidden = true;
-  document.getElementById('ai-save-as-food').checked = false;
-});
-
-// --- Manual flow ---
-const manualNameInput = document.getElementById('manual-name');
-const manualGramsInput = document.getElementById('manual-grams');
-const manualCalsInput = document.getElementById('manual-cals');
-let manualMatchedFood = null;
-
-function refreshFoodDatalist() {
-  let dl = document.getElementById('food-options');
-  if (!dl) {
-    dl = document.createElement('datalist');
-    dl.id = 'food-options';
-    document.body.appendChild(dl);
-    manualNameInput.setAttribute('list', 'food-options');
-  }
-  dl.innerHTML = foods.map(f => `<option value="${escapeHtml(f.name)}">`
-    + (f.altName ? `<option value="${escapeHtml(f.altName)}">` : '')).join('');
-}
-
-manualNameInput.addEventListener('input', () => {
-  const match = matchFoodByExactName(manualNameInput.value);
-  manualMatchedFood = match || null;
-  if (match && manualGramsInput.value) {
-    manualCalsInput.value = Math.round(match.calsPerGram * parseFloat(manualGramsInput.value));
-  }
-});
-manualGramsInput.addEventListener('input', () => {
-  if (manualMatchedFood) {
-    const g = parseFloat(manualGramsInput.value) || 0;
-    manualCalsInput.value = Math.round(manualMatchedFood.calsPerGram * g);
-  }
-});
-
-document.getElementById('manual-confirm-btn').addEventListener('click', () => {
-  const name = manualNameInput.value.trim();
-  const grams = parseFloat(manualGramsInput.value) || 0;
-  const cals = parseFloat(manualCalsInput.value) || 0;
-  if (!name || !cals) { alert('Fyll i namn och kalorier.'); return; }
-  addLog({ description: name, grams, calories: cals, type: 'manual' });
-  if (document.getElementById('manual-save-as-food').checked && grams > 0) {
-    foods.push({ id: uid(), name, calsPerGram: cals / grams });
-    persistAll();
-    refreshFoodDatalist();
-  }
-  manualNameInput.value = '';
-  manualGramsInput.value = '';
-  manualCalsInput.value = '';
-  manualMatchedFood = null;
-  document.getElementById('manual-save-as-food').checked = false;
-});
-
-// ---------------------------------------------------------------------------
-// AI CHAT mode
+// AI CHAT mode — the only logging method
 // ---------------------------------------------------------------------------
 const chatMessagesEl = document.getElementById('chat-messages');
 const chatInputEl = document.getElementById('chat-input');
@@ -584,9 +501,36 @@ function renderChatPending() {
 }
 
 document.getElementById('chat-log-btn').addEventListener('click', () => {
+  // Log each item individually
   chatPendingDraft.forEach(item => {
     addLog({ description: item.name, grams: item.grams, calories: item.caloriesTotal, type: 'chat' });
   });
+
+  // Auto-create a "rätt" (batch) from the group
+  if (chatPendingDraft.length >= 1) {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const batchName = `Måltid ${hh}:${mm}`;
+    const ingredients = chatPendingDraft.map(item => ({
+      name: item.name,
+      grams: item.grams,
+      calsPerGram: item.grams > 0 ? item.caloriesTotal / item.grams : 0,
+    }));
+    const totalGrams = ingredients.reduce((s, i) => s + i.grams, 0);
+    const totalCals = ingredients.reduce((s, i) => s + i.grams * i.calsPerGram, 0);
+    batches.push({
+      id: uid(),
+      name: batchName,
+      ingredients,
+      totalGrams,
+      totalCals,
+      portionType: 'variable',
+      createdAt: Date.now(),
+    });
+    persistAll();
+  }
+
   chatPendingDraft = [];
   renderChatPending();
   chatHistory.push({ role: 'assistant', content: 'Loggat! Säg till om du åt något mer.' });
@@ -1066,7 +1010,7 @@ document.getElementById('export-csv-btn').addEventListener('click', () => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `kaloriloggen-${todayStr()}.csv`;
+  a.download = `roadto80-${todayStr()}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 });

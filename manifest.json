@@ -1,7 +1,7 @@
 {
-  "name": "Kaloriloggen",
-  "short_name": "Kaloriloggen",
-  "description": "Logga kalorier med röst, AI-uppskattningar och sparade rätter.",
+  "name": "Road to 80",
+  "short_name": "Road to 80",
+  "description": "Logga kalorier med röst, AI-chatt och sparade rätter.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

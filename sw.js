@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kaloriloggen-v1';
+const CACHE_NAME = 'roadto80-v1';
 const APP_SHELL = [
   './',
   './index.html',

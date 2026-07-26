@@ -336,6 +336,13 @@ main#views {
   border-color: var(--marigold-dark);
   color: var(--ink);
 }
+.mic-btn.recording {
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(181,83,60,0.5); }
+  50% { box-shadow: 0 0 0 8px rgba(181,83,60,0); }
+}
 .mic-status {
   min-height: 16px;
   font-size: 12px;

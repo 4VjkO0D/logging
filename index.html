@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1F6F63">
-<title>Kaloriloggen</title>
+<title>Road to 80</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -19,7 +19,7 @@
 
   <header class="topbar">
     <div class="topbar-inner">
-      <span class="wordmark">Kaloriloggen</span>
+      <span class="wordmark">Road to 80</span>
       <nav class="tabs" id="tabs">
         <button class="tab active" data-view="today">Idag</button>
         <button class="tab" data-view="add">Logga</button>
@@ -65,46 +65,9 @@
       <p class="empty-hint" id="today-empty" hidden>Inget loggat än idag. Tryck på <strong>Logga</strong> för att lägga till något.</p>
     </section>
 
-    <!-- ADD -->
+    <!-- ADD — chat only -->
     <section class="view" id="view-add" hidden>
-      <div class="segmented" id="add-mode-toggle">
-        <button class="seg active" data-mode="ai">AI-uppskattning</button>
-        <button class="seg" data-mode="chat">AI-chatt</button>
-        <button class="seg" data-mode="manual">Exakta värden</button>
-      </div>
-
-      <!-- AI mode -->
-      <div class="panel" id="add-ai-panel">
-        <label class="field-label" for="ai-desc">Vad åt du? (och hur många gram)</label>
-        <div class="input-with-mic">
-          <input type="text" id="ai-desc" placeholder="t.ex. broccoli, 150 gram" autocomplete="off">
-          <button class="mic-btn" id="mic-btn" type="button" title="Tala in">
-            <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
-          </button>
-        </div>
-        <p class="mic-status" id="mic-status"></p>
-        <button class="btn-primary" id="ai-estimate-btn">Fråga AI</button>
-
-        <div class="ai-result" id="ai-result" hidden>
-          <div class="ai-result-row">
-            <span id="ai-result-name">–</span>
-            <span class="source-badge" id="ai-result-source">AI-uppskattning</span>
-          </div>
-          <div class="ai-result-row">
-            <span class="mono" id="ai-result-cals">– kcal</span>
-          </div>
-          <div class="field-row">
-            <label>Gram <input type="number" id="ai-result-grams" class="mono"></label>
-            <label>Totalt kcal <input type="number" id="ai-result-total" class="mono"></label>
-          </div>
-          <label class="checkbox-row"><input type="checkbox" id="ai-save-as-food"> Spara som fast livsmedel</label>
-          <button class="btn-primary" id="ai-confirm-btn">Logga</button>
-        </div>
-        <p class="ai-error" id="ai-error" hidden></p>
-      </div>
-
-      <!-- Chat mode -->
-      <div class="panel chat-panel" id="add-chat-panel" hidden>
+      <div class="panel chat-panel" id="add-chat-panel">
         <div class="chat-header">
           <span class="muted small">Chatten minns tills du rensar den.</span>
           <button class="btn-small" id="chat-reset-btn">Rensa chatt</button>
@@ -125,19 +88,6 @@
         </div>
         <p class="mic-status" id="chat-mic-status"></p>
         <button class="btn-primary" id="chat-send-btn">Skicka</button>
-      </div>
-
-      <!-- Manual mode -->
-      <div class="panel" id="add-manual-panel" hidden>
-        <label class="field-label">Namn
-          <input type="text" id="manual-name" placeholder="t.ex. Kycklingfilé (min variant)">
-        </label>
-        <div class="field-row">
-          <label>Gram <input type="number" id="manual-grams" class="mono"></label>
-          <label>Totalt kcal <input type="number" id="manual-cals" class="mono"></label>
-        </div>
-        <label class="checkbox-row"><input type="checkbox" id="manual-save-as-food"> Spara som fast livsmedel</label>
-        <button class="btn-primary" id="manual-confirm-btn">Logga</button>
       </div>
     </section>
 
