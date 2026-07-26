@@ -308,15 +308,19 @@ function setupVoiceInput(inputEl, btnEl, statusEl) {
     recognition.lang = settings.voiceLang || 'sv-SE';
 
     recognition.onresult = (e) => {
-      let interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
+      // Rebuild the complete transcript from ALL results (0..length)
+      // to avoid duplicates when the API re-fires previous results.
+      let allFinal = '';
+      let allInterim = '';
+      for (let i = 0; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
-          finalTranscript += e.results[i][0].transcript;
+          allFinal += e.results[i][0].transcript;
         } else {
-          interim += e.results[i][0].transcript;
+          allInterim += e.results[i][0].transcript;
         }
       }
-      inputEl.value = finalTranscript + interim;
+      finalTranscript = allFinal;
+      inputEl.value = allFinal + allInterim;
     };
     recognition.onerror = (e) => {
       if (e.error === 'aborted' || e.error === 'no-speech') {
