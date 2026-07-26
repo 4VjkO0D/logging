@@ -1,6 +1,7 @@
 // ---------------------------------------------------------------------------
 // Road to 80 — storage helpers
 // ---------------------------------------------------------------------------
+const APP_VERSION = 'v1.0';
 const LS = {
   settings: 'cl_settings',
   foods: 'cl_foods',
@@ -279,6 +280,7 @@ function setupVoiceInput(inputEl, btnEl, statusEl) {
   let recognition = null;
   let listening = false;
   let finalTranscript = '';
+  let seenFinals = null;     // Set of result indices already collected
 
   function stopListening() {
     if (recognition) {
@@ -302,25 +304,27 @@ function setupVoiceInput(inputEl, btnEl, statusEl) {
 
     // User tapped to start
     finalTranscript = '';
+    seenFinals = new Set();
     recognition = new SpeechRecognitionImpl();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = settings.voiceLang || 'sv-SE';
 
     recognition.onresult = (e) => {
-      // Rebuild the complete transcript from ALL results (0..length)
-      // to avoid duplicates when the API re-fires previous results.
-      let allFinal = '';
+      // Only collect final results we haven't seen yet (the API may re-fire them).
+      // Build interim text fresh each time from all non-final results.
       let allInterim = '';
       for (let i = 0; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
-          allFinal += e.results[i][0].transcript;
+          if (!seenFinals.has(i)) {
+            seenFinals.add(i);
+            finalTranscript += e.results[i][0].transcript;
+          }
         } else {
           allInterim += e.results[i][0].transcript;
         }
       }
-      finalTranscript = allFinal;
-      inputEl.value = allFinal + allInterim;
+      inputEl.value = finalTranscript + allInterim;
     };
     recognition.onerror = (e) => {
       if (e.error === 'aborted' || e.error === 'no-speech') {
@@ -421,6 +425,17 @@ function renderToday() {
 }
 
 // Auto-add a food item to foods if it doesn't already exist.
+function refreshFoodDatalist() {
+  let dl = document.getElementById('food-options');
+  if (!dl) {
+    dl = document.createElement('datalist');
+    dl.id = 'food-options';
+    document.body.appendChild(dl);
+  }
+  dl.innerHTML = foods.map(f => `<option value="${escapeHtml(f.name)}">`
+    + (f.altName ? `<option value="${escapeHtml(f.altName)}">` : '')).join('');
+}
+
 function autoSaveFood(name, grams, calories) {
   if (!name || grams <= 0 || calories <= 0) return;
   const calsPerGram = calories / grams;
@@ -1048,6 +1063,7 @@ document.getElementById('settings-save-btn').addEventListener('click', () => {
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
+document.getElementById('version-tag').textContent = APP_VERSION;
 refreshFoodDatalist();
 renderToday();
 
