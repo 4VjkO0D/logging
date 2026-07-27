@@ -248,8 +248,35 @@ const CHAT_PROTOCOL = `Svarsformat (följ alltid, oavsett hur du resonerar):
 const DEFAULT_CHAT_INSTRUCTIONS = `Så här ska du resonera:
 1. Om det användaren skriver inte rimligen är en beskrivning av mat eller dryck (t.ex. "ja", "hej", eller annat obegripligt), anta ALDRIG att det är mat — fråga istället kort vad de menar eller vad de åt.
 2. Om mängd (gram/antal) saknas för något som nämnts, fråga efter det EN gång. Om användaren svarar att de inte vet, inte mätte, eller liknande — fråga INTE igen. Gör då direkt en rimlig standarduppskattning (t.ex. typisk vikt för den varan) och gå vidare, och nämn kort vilket antagande du gjorde.
-3. När tillagningsgrad (kokt/rå/stekt/etc) skulle ändra kalorierna MÄRKBART (t.ex. rått vs kokt kött, ris, pasta) och det inte redan är tydligt — använd VAL:-formatet (se Svarsformat ovan) för att ge användaren knappar att trycka på. Fråga ALDRIG i vanlig text om sådana val. Fråga ALDRIG om detaljer som knappt påverkar kalorierna (t.ex. exakt smak på en glass eller godis, märke på liknande produkter) — gör bara en rimlig uppskattning för sånt direkt.
-4. Ställ som mest EN uppföljningsfråga per svar, och bara om den faktiskt behövs för att kunna ge en rimlig kaloriuppskattning. Fråga aldrig igen om något du redan frågat om i det här samtalet — använd det användaren redan sagt, eller gör en uppskattning.`;
+3. Använd VAL:-formatet (se Svarsformat ovan) för att ge användaren knappar när tillagningsgrad MÄRKBART påverkar kalorierna. Fråga ALDRIG i vanlig text om sådana val. Följ denna kategoriserade logik:
+
+   Kräver VAL: med råt/kokt + metod (två steg, andra steget om relevant):
+   - Fettrikt kött (fläsk, bacon, lamm, anka, korv) – 20–50%+ skillnad
+   - Fet fisk (lax, makrill) – 10–15% skillnad
+
+   Kräver VAL: med råt/kokt, metod mindre kritisk:
+   - Magert kött/fisk (kyckling, kalkon, torsk) – 15–30% skillnad
+
+   Kräver VAL: endast råt/kokt (enkel fråga, relevanta alternativ):
+   - Stärkelserika rotfrukter (potatis, sötpotatis, majs) – 10–20% skillnad
+   - Baljväxter (bönor, linser) – 60–70% skillnad (vattenupptag)
+   - Spannmål (ris, pasta, havre) – 60–70% skillnad (vattenupptag)
+   - Svamp – 25–60% ökning (vattenförlust, metod påverkar något)
+
+   Kräver INGET VAL: (gör en rimlig uppskattning direkt)
+   - Vanliga grönsaker (paprika, gurka, broccoli, zucchini, tomat) – <10% skillnad
+   - Bladgrönsaker (spinat, mangold, sallad) – ~0% per 100g (samma kaloritäthet)
+   - Frukt – ~0%
+   - Ägg – <5%
+   - Nötter/frön – <10%
+   - Mejeri – ej tillämpligt
+
+   Exempel VAL: för svamp: VAL:{"fråga":"Hur var svampen tillagad?","alternativ":["Rå","Kokt/stekt i panna","Grillad/ugnsbakad"]}
+   Exempel VAL: för kyckling: VAL:{"fråga":"Hur var kycklingen tillagad?","alternativ":["Rå/otillagad","Stekt i panna","Ugnsbakad","Kokt","Grillad"]}
+   Exempel VAL: för ris: VAL:{"fråga":"Var riset kokt eller otillagat?","alternativ":["Kokt","Rå/otillagat"]}
+
+4. Fråga ALDRIG om detaljer som knappt påverkar kalorierna (t.ex. exakt smak på en glass eller godis, märke på liknande produkter) — gör bara en rimlig uppskattning för sånt direkt.
+5. Ställ som mest EN uppföljningsfråga per svar, och bara om den faktiskt behövs för att kunna ge en rimlig kaloriuppskattning. Fråga aldrig igen om något du redan frågat om i det här samtalet — använd det användaren redan sagt, eller gör en uppskattning.`;
 
 function buildChatSystem() {
   const instructions = settings.chatInstructions || DEFAULT_CHAT_INSTRUCTIONS;
