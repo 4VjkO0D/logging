@@ -294,27 +294,6 @@ main#views {
   color: var(--ink);
   background: var(--bg);
 }
-.field-row {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-.field-row label {
-  flex: 1;
-  font-size: 12.5px;
-  color: var(--ink-soft);
-  font-weight: 500;
-}
-.field-row input {
-  display: block;
-  width: 100%;
-  margin-top: 6px;
-  padding: 10px 11px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 14.5px;
-  background: var(--bg);
-}
 .mono { font-family: var(--font-mono); }
 
 .input-with-mic {
@@ -393,27 +372,8 @@ main#views {
   cursor: pointer;
 }
 
-.ai-result {
-  margin-top: 16px;
-  border-top: 1px dashed var(--line);
-  padding-top: 14px;
 }
-.ai-result-row {
-  display: flex;
-  justify-content: space-between;
-  font-weight: 600;
-  margin-bottom: 10px;
-  font-size: 14.5px;
 }
-.checkbox-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--ink-soft);
-  margin: 6px 0 10px 0;
-}
-.checkbox-row input { width: 16px; height: 16px; }
 
 /* ---------- Source badge ---------- */
 .source-badge {
@@ -459,11 +419,6 @@ main#views {
   object-fit: cover;
   border-radius: 10px;
   background: #000;
-}
-.ai-error {
-  color: var(--brick);
-  font-size: 13px;
-  margin-top: 10px;
 }
 
 /* ---------- Choice buttons (VAL: marker) ---------- */
@@ -554,15 +509,6 @@ main#views {
   color: var(--ink);
   border-bottom-left-radius: 3px;
 }
-.chat-msg.error {
-  align-self: flex-start;
-  background: #FBEAE6;
-  color: var(--brick);
-}
-.chat-pending {
-  border-top: 1px dashed var(--line);
-  margin-bottom: 12px;
-  padding-top: 12px;
 }
 .pending-row {
   display: flex;

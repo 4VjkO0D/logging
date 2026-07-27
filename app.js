@@ -192,20 +192,6 @@ async function callDeepSeekRaw(systemPrompt, historyMessages) {
   return (data?.choices?.[0]?.message?.content || '').trim();
 }
 
-// Simple local helpers so obvious matches never need to touch the AI at all
-function extractGrams(text) {
-  const m = text.match(/(\d+(?:[.,]\d+)?)\s*(gram|g)\b/i);
-  if (m) return parseFloat(m[1].replace(',', '.'));
-  const m2 = text.match(/(\d+(?:[.,]\d+)?)/);
-  return m2 ? parseFloat(m2[1].replace(',', '.')) : null;
-}
-function findFoodMatch(text) {
-  const lower = text.toLowerCase();
-  return foods.find(f =>
-    lower.includes(f.name.toLowerCase()) ||
-    (f.altName && lower.includes(f.altName.toLowerCase()))
-  );
-}
 // Exact (not substring) match by either name, used for prefill in forms/datalists.
 function matchFoodByExactName(text) {
   const t = (text || '').trim().toLowerCase();
