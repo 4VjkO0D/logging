@@ -276,7 +276,7 @@ const DEFAULT_CHAT_INSTRUCTIONS = `Så här ska du resonera:
    Exempel VAL: för ris: VAL:{"fråga":"Var riset kokt eller otillagat?","alternativ":["Kokt","Rå/otillagat"]}
 
 4. Fråga ALDRIG om detaljer som knappt påverkar kalorierna (t.ex. exakt smak på en glass eller godis, märke på liknande produkter) — gör bara en rimlig uppskattning för sånt direkt.
-5. Ställ som mest EN uppföljningsfråga per svar, och bara om den faktiskt behövs för att kunna ge en rimlig kaloriuppskattning. Fråga aldrig igen om något du redan frågat om i det här samtalet — använd det användaren redan sagt, eller gör en uppskattning.`;
+5. Ställ som mest EN uppföljningsfråga per VAL:-block. Om flera saker behöver ett val (t.ex. kyckling OCH ris i samma måltid), skicka flera VAL: efter varandra i samma svar — ett per sak: VAL:{...} VAL:{...}. Fråga aldrig igen om något du redan frågat om i det här samtalet — använd det användaren redan sagt, eller gör en uppskattning.`;
 
 function buildChatSystem() {
   const instructions = settings.chatInstructions || DEFAULT_CHAT_INSTRUCTIONS;
@@ -551,16 +551,20 @@ function renderChatMessages() {
       const raw = m.content;
       const isKlar = /KLART:/i.test(raw);
 
-      // Detect VAL: marker — strip it from displayed text
+      // Detect all VAL: markers — strip them from displayed text
       let displayText = raw;
-      let valData = null;
-      const valMatch = raw.match(/VAL:\s*(\{[\s\S]*?\})/);
-      if (valMatch) {
+      const valBlocks = [];
+      const valRegex = /VAL:\s*(\{[\s\S]*?\})/g;
+      let valMatch;
+      while ((valMatch = valRegex.exec(raw)) !== null) {
         try {
-          valData = JSON.parse(valMatch[1]);
-          displayText = raw.replace(valMatch[0], '').trim();
+          const parsed = JSON.parse(valMatch[1]);
+          if (parsed && parsed.alternativ && Array.isArray(parsed.alternativ)) {
+            valBlocks.push(parsed);
+          }
+          displayText = displayText.replace(valMatch[0], '').trim();
         } catch (e) {
-          // Invalid VAL JSON — show as normal text
+          // Invalid VAL JSON — skip it
         }
       }
 
@@ -571,11 +575,11 @@ function renderChatMessages() {
         : displayText || raw;
       chatMessagesEl.appendChild(div);
 
-      // Render choice buttons if VAL: data was found
-      if (valData && valData.alternativ && Array.isArray(valData.alternativ)) {
+      // Render choice buttons for each VAL: block
+      valBlocks.forEach(vd => {
         const choiceArea = document.createElement('div');
         choiceArea.className = 'chat-choice-area';
-        valData.alternativ.forEach(alt => {
+        vd.alternativ.forEach(alt => {
           const btn = document.createElement('button');
           btn.className = 'choice-btn';
           btn.textContent = alt;
@@ -585,7 +589,7 @@ function renderChatMessages() {
           choiceArea.appendChild(btn);
         });
         chatMessagesEl.appendChild(choiceArea);
-      }
+      });
     } else {
       const div = document.createElement('div');
       div.className = `chat-msg ${m.role}`;
