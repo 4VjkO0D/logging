@@ -771,11 +771,13 @@ function renderBatches() {
         <span class="log-item-name">${escapeHtml(b.name)}</span>
         <span class="log-item-meta">${metaText}</span>
       </div>
+      <button class="btn-small" data-view="${b.id}">Visa</button>
       <button class="btn-small" data-log="${b.id}">Logga</button>
       <button class="icon-btn" data-del="${b.id}" title="Ta bort">✕</button>
     `;
     list.appendChild(li);
   });
+  list.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', () => openBatchDetail(btn.dataset.view)));
   list.querySelectorAll('[data-log]').forEach(btn => btn.addEventListener('click', () => openBatchLogModal(btn.dataset.log)));
   list.querySelectorAll('[data-del]').forEach(btn => btn.addEventListener('click', () => {
     if (!confirm('Ta bort den här rätten?')) return;
@@ -943,6 +945,56 @@ document.getElementById('batch-log-confirm').addEventListener('click', () => {
   const density = batchBeingLogged.totalGrams > 0 ? batchBeingLogged.totalCals / batchBeingLogged.totalGrams : 0;
   addLog({ description: batchBeingLogged.name, grams: g, calories: g * density, type: 'batch', refId: batchBeingLogged.id });
   batchLogModal.hidden = true;
+});
+
+// --- Batch detail / edit modal ---
+const batchDetailModal = document.getElementById('batch-detail-modal');
+let batchDetailId = null;
+
+function openBatchDetail(batchId) {
+  const b = batches.find(x => x.id === batchId);
+  if (!b) return;
+  batchDetailId = b.id;
+  document.getElementById('batch-detail-name').value = b.name;
+  renderBatchDetailIngredients(b);
+  batchDetailModal.hidden = false;
+}
+
+function renderBatchDetailIngredients(b) {
+  const container = document.getElementById('batch-detail-ingredients');
+  container.innerHTML = '';
+  b.ingredients.forEach(ing => {
+    const row = document.createElement('div');
+    row.className = 'ingredient-row';
+    const calPerGram = ing.calsPerGram || 0;
+    const cals = Math.round((ing.grams || 0) * calPerGram);
+    row.innerHTML = `
+      <span class="field-label" style="flex:2;margin:0;">
+        ${escapeHtml(ing.name)}
+        <span class="log-item-meta">${Math.round(ing.grams)} g · ${cals} kcal · ${(calPerGram * 100).toFixed(0)} kcal/100g</span>
+      </span>
+    `;
+    container.appendChild(row);
+  });
+  const totalGrams = b.ingredients.reduce((s, i) => s + (i.grams || 0), 0);
+  const totalCals = b.ingredients.reduce((s, i) => s + (i.grams || 0) * (i.calsPerGram || 0), 0);
+  document.getElementById('batch-detail-total').textContent = `Totalt: ${Math.round(totalGrams)} g · ${Math.round(totalCals)} kcal`;
+}
+
+document.getElementById('batch-detail-cancel-btn').addEventListener('click', () => {
+  batchDetailModal.hidden = true;
+  batchDetailId = null;
+});
+document.getElementById('batch-detail-save-btn').addEventListener('click', () => {
+  const newName = document.getElementById('batch-detail-name').value.trim();
+  if (!newName) { alert('Namnet får inte vara tomt.'); return; }
+  const idx = batches.findIndex(b => b.id === batchDetailId);
+  if (idx === -1) return;
+  batches[idx].name = newName;
+  persistAll();
+  batchDetailModal.hidden = true;
+  batchDetailId = null;
+  renderBatches();
 });
 
 // ---------------------------------------------------------------------------
