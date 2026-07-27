@@ -284,6 +284,7 @@ function setupVoiceInput(inputEl, btnEl, statusEl) {
   let currentRecognition = null;
   let listening = false;
   let finalTranscript = '';
+  let hadError = false;
 
   function startInstance() {
     if (!listening) return;
@@ -303,14 +304,33 @@ function setupVoiceInput(inputEl, btnEl, statusEl) {
         inputEl.value = finalTranscript + text;
       }
     };
-    rec.onerror = () => { /* ignore — onend handles cleanup */ };
-    rec.onend = () => {
-      currentRecognition = null;
-      if (!listening) {
-        // User stopped — final cleanup.
+    rec.onerror = (err) => {
+      hadError = true;
+      if (err.error === 'no-speech' || err.error === 'aborted' || err.error === 'not-allowed' || err.error === 'service-not-allowed' || err.error === 'network') {
+        listening = false;
         btnEl.classList.remove('listening');
         btnEl.classList.remove('recording');
-        statusEl.textContent = '';
+        const msgs = {
+          'no-speech': 'Inget tal hördes. Försök igen.',
+          'not-allowed': 'Mikrofonen tilläts inte. Kontrollera webbläsarens behörigheter.',
+          'service-not-allowed': 'Röstigenkänning är blockerad. Kontrollera webbläsarens behörigheter.',
+          'network': 'Nätverksfel — röstigenkänning kräver internet.',
+        };
+        statusEl.textContent = msgs[err.error] || 'Ett fel uppstod: ' + err.error;
+        if (currentRecognition) {
+          try { currentRecognition.abort(); } catch (e) { /* ignore */ }
+          currentRecognition = null;
+        }
+      }
+    };
+    rec.onend = () => {
+      currentRecognition = null;
+      if (!listening || hadError) {
+        // User stopped or error occurred — final cleanup.
+        btnEl.classList.remove('listening');
+        btnEl.classList.remove('recording');
+        if (!hadError) statusEl.textContent = '';
+        hadError = false;
         return;
       }
       // Still recording — keep going with a fresh instance.
