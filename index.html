@@ -65,14 +65,17 @@
       <p class="empty-hint" id="today-empty" hidden>Inget loggat än idag. Tryck på <strong>Logga</strong> för att lägga till något.</p>
     </section>
 
-    <!-- ADD — chat only -->
+    <!-- ADD — chat only (full page) -->
     <section class="view" id="view-add" hidden>
-      <div class="panel chat-panel" id="add-chat-panel">
-        <div class="chat-header">
-          <span class="muted small">Chatten minns tills du rensar den.</span>
-          <button class="btn-small" id="chat-reset-btn">Rensa chatt</button>
+      <div class="chat-fullpage" id="add-chat-panel">
+
+        <div class="chat-messages-wrap">
+          <div class="chat-header">
+            <span class="muted small">Chatten minns tills du rensar den.</span>
+            <button class="btn-small" id="chat-reset-btn">Rensa chatt</button>
+          </div>
+          <div class="chat-messages" id="chat-messages"></div>
         </div>
-        <div class="chat-messages" id="chat-messages"></div>
 
         <div class="chat-pending" id="chat-pending" hidden>
           <p class="muted small">Klart att logga:</p>
@@ -80,14 +83,17 @@
           <button class="btn-primary" id="chat-log-btn">Logga allt</button>
         </div>
 
-        <div class="input-with-mic">
-          <input type="text" id="chat-input" placeholder="Berätta vad du åt..." autocomplete="off">
-          <button class="mic-btn" id="chat-mic-btn" type="button" title="Tala in">
-            <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
-          </button>
+        <div class="chat-input-area">
+          <div class="input-with-mic">
+            <input type="text" id="chat-input" placeholder="Berätta vad du åt..." autocomplete="off">
+            <button class="mic-btn" id="chat-mic-btn" type="button" title="Tala in">
+              <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+            </button>
+          </div>
+          <p class="mic-status" id="chat-mic-status"></p>
+          <button class="btn-primary" id="chat-send-btn">Skicka</button>
         </div>
-        <p class="mic-status" id="chat-mic-status"></p>
-        <button class="btn-primary" id="chat-send-btn">Skicka</button>
+
       </div>
     </section>
 
