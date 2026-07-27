@@ -241,13 +241,14 @@ const CHAT_PROTOCOL = `Svarsformat (följ alltid, oavsett hur du resonerar):
 - Om du behöver mer information eller bara konverserar: svara ENDAST med kort, naturlig svensk text. Ingen JSON, inget prefix.
 - När du har en rimlig uppskattning för ALLA livsmedel som nämnts i samtalet (namn, gram, källa) — även om vissa detaljer är antagna snarare än exakta: svara ENDAST med den bokstavliga texten "KLART:" direkt följt av en JSON-array, utan något annat före eller efter, utan markdown-taggar. Exakt format:
 [{"name": string, "grams": number, "caloriesTotal": number, "calsPerGram": number, "source": "sparat livsmedel" | "AI-uppskattning" | "webbsökning"}]
+- När du behöver fråga användaren om ett val mellan flera alternativ (t.ex. tillagningsgrad på kyckling/kött/ris/pasta) — fråga KORT på svenska, och lägg därefter EXAKT på en egen rad: VAL:{"fråga":"din fråga här","alternativ":["Alternativ 1","Alternativ 2","..."]} Exempel: VAL:{"fråga":"Hur var kycklingen tillagad?","alternativ":["Rå/otillagad","Stekt i panna","Ugnsbakad","Kokt","Grillad"]}. Använd bara VAL: för val som MÄRKBART påverkar kalorierna. Blanda aldrig VAL: med KLART: i samma svar.
 - Blanda aldrig fritext och JSON i samma svar.`;
 
 // User-editable reasoning style — how cautious/chatty the AI is, when it asks follow-ups, etc.
 const DEFAULT_CHAT_INSTRUCTIONS = `Så här ska du resonera:
 1. Om det användaren skriver inte rimligen är en beskrivning av mat eller dryck (t.ex. "ja", "hej", eller annat obegripligt), anta ALDRIG att det är mat — fråga istället kort vad de menar eller vad de åt.
 2. Om mängd (gram/antal) saknas för något som nämnts, fråga efter det EN gång. Om användaren svarar att de inte vet, inte mätte, eller liknande — fråga INTE igen. Gör då direkt en rimlig standarduppskattning (t.ex. typisk vikt för den varan) och gå vidare, och nämn kort vilket antagande du gjorde.
-3. Fråga bara om tillagningsgrad (kokt/rå/stekt/etc) när det skulle ändra kalorierna MÄRKBART (t.ex. rått vs kokt kött, ris, pasta) och det inte redan är tydligt. Fråga ALDRIG om detaljer som knappt påverkar kalorierna (t.ex. exakt smak på en glass eller godis, märke på liknande produkter) — gör bara en rimlig uppskattning för sånt direkt.
+3. När tillagningsgrad (kokt/rå/stekt/etc) skulle ändra kalorierna MÄRKBART (t.ex. rått vs kokt kött, ris, pasta) och det inte redan är tydligt — använd VAL:-formatet (se Svarsformat ovan) för att ge användaren knappar att trycka på. Fråga ALDRIG i vanlig text om sådana val. Fråga ALDRIG om detaljer som knappt påverkar kalorierna (t.ex. exakt smak på en glass eller godis, märke på liknande produkter) — gör bara en rimlig uppskattning för sånt direkt.
 4. Ställ som mest EN uppföljningsfråga per svar, och bara om den faktiskt behövs för att kunna ge en rimlig kaloriuppskattning. Fråga aldrig igen om något du redan frågat om i det här samtalet — använd det användaren redan sagt, eller gör en uppskattning.`;
 
 function buildChatSystem() {
@@ -519,11 +520,51 @@ let chatPendingDraft = [];
 function renderChatMessages() {
   chatMessagesEl.innerHTML = '';
   chatHistory.forEach(m => {
-    const div = document.createElement('div');
-    const isKlar = m.role === 'assistant' && /KLART:/i.test(m.content);
-    div.className = `chat-msg ${m.role}`;
-    div.textContent = isKlar ? 'Här är vad jag uppfattade — kolla sammanställningen nedan.' : m.content;
-    chatMessagesEl.appendChild(div);
+    if (m.role === 'assistant') {
+      const raw = m.content;
+      const isKlar = /KLART:/i.test(raw);
+
+      // Detect VAL: marker — strip it from displayed text
+      let displayText = raw;
+      let valData = null;
+      const valMatch = raw.match(/VAL:\s*(\{[\s\S]*?\})/);
+      if (valMatch) {
+        try {
+          valData = JSON.parse(valMatch[1]);
+          displayText = raw.replace(valMatch[0], '').trim();
+        } catch (e) {
+          // Invalid VAL JSON — show as normal text
+        }
+      }
+
+      const div = document.createElement('div');
+      div.className = `chat-msg ${m.role}`;
+      div.textContent = isKlar
+        ? 'Här är vad jag uppfattade — kolla sammanställningen nedan.'
+        : displayText || raw;
+      chatMessagesEl.appendChild(div);
+
+      // Render choice buttons if VAL: data was found
+      if (valData && valData.alternativ && Array.isArray(valData.alternativ)) {
+        const choiceArea = document.createElement('div');
+        choiceArea.className = 'chat-choice-area';
+        valData.alternativ.forEach(alt => {
+          const btn = document.createElement('button');
+          btn.className = 'choice-btn';
+          btn.textContent = alt;
+          btn.addEventListener('click', () => {
+            handleChoiceClick(alt);
+          });
+          choiceArea.appendChild(btn);
+        });
+        chatMessagesEl.appendChild(choiceArea);
+      }
+    } else {
+      const div = document.createElement('div');
+      div.className = `chat-msg ${m.role}`;
+      div.textContent = m.content;
+      chatMessagesEl.appendChild(div);
+    }
   });
   chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
 }
@@ -646,6 +687,43 @@ document.getElementById('chat-send-btn').addEventListener('click', sendChatMessa
 chatInputEl.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); sendChatMessage(); }
 });
+
+// Handle when user taps a VAL: choice button
+async function handleChoiceClick(choice) {
+  // Add the choice as a user message
+  chatHistory.push({ role: 'user', content: choice });
+  persistChat();
+  renderChatMessages();
+
+  const sendBtn = document.getElementById('chat-send-btn');
+  sendBtn.disabled = true;
+  const origText = sendBtn.textContent;
+  sendBtn.textContent = '...';
+  try {
+    const raw = await callDeepSeekRaw(buildChatSystem(), chatHistory);
+    chatHistory.push({ role: 'assistant', content: raw });
+    persistChat();
+    renderChatMessages();
+    try {
+      const items = extractKlarPayload(raw);
+      if (items) {
+        chatPendingDraft = items.filter(i => i && i.name && i.grams > 0);
+        renderChatPending();
+      }
+    } catch (e) {
+      chatHistory.push({ role: 'assistant', content: 'Kunde inte tolka sammanställningen från AI:n. Kan du säga det igen, gärna lite enklare?' });
+      persistChat();
+      renderChatMessages();
+    }
+  } catch (err) {
+    chatHistory.push({ role: 'assistant', content: 'Fel: ' + err.message });
+    persistChat();
+    renderChatMessages();
+  } finally {
+    sendBtn.disabled = false;
+    sendBtn.textContent = origText;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // BATCHES view
